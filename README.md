@@ -1,7 +1,6 @@
 # Simulação de ensaio de fungicida em soja
 
 Pipeline reprodutível com publicação automática via GitHub Actions e GitHub Pages.
-
 A cada push no repositório, o workflow executa a simulação dos dados e publica o relatório atualizado automaticamente.
 
 ## Estrutura do projeto
@@ -14,7 +13,8 @@ soja_actions/
 ├── R/
 │   └── 01_simular_dados.R
 ├── report/
-│   └── relatorio_simulacao.qmd
+│   ├── relatorio_simulacao.qmd
+│   └── index.html
 ├── data/
 └── README.md
 ```
@@ -25,7 +25,8 @@ soja_actions/
 2. Instala os pacotes via Posit Package Manager (binários pré-compilados)
 3. Roda o script de simulação e gera os dados
 4. Renderiza o relatório Quarto
-5. Publica o HTML no GitHub Pages automaticamente
+5. Copia o `index.html` de redirecionamento para a pasta de publicação
+6. Publica o HTML no GitHub Pages automaticamente
 
 ## Como ativar o GitHub Pages
 
@@ -36,8 +37,10 @@ soja_actions/
 O relatório estará disponível em:
 
 ```
-https://seu-usuario.github.io/soja_actions/relatorio_simulacao.html
+https://jenniferlopes.github.io/tutorial_github_actions/relatorio_simulacao.html
 ```
+
+O `index.html` redireciona automaticamente para o relatório, então não é necessário digitar o nome do arquivo no link.
 
 ## Como reproduzir localmente
 
