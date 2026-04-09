@@ -1,0 +1,343 @@
+---
+title: "Simulação de dados: ensaio de fungicida em soja"
+subtitle: "Como gerar dados experimentais com estrutura realista em R"
+author: "Jennifer Luz Lopes"
+date: today
+date-format: "DD/MM/YYYY"
+lang: pt
+format:
+  html:
+    toc: true
+    toc-title: "Sumário"
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    code-summary: "Exibir código"
+    self-contained: true
+    theme: flatly
+    fig-align: center
+    fig-width: 8
+    fig-height: 5
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: pacotes
+
+library(tidyverse)
+
+cores_cafe <- c(
+  azul_escuro = "#224573",
+  marrom      = "#6B4F4F",
+  azul_claro  = "#4A6FA5",
+  bege        = "#E5D3B3"
+)
+```
+
+::: {.callout-important}
+## Sobre este relatório
+
+Este relatório documenta o processo de simulação de dados para um ensaio de eficácia de fungicida em soja. O objetivo é mostrar como construir um conjunto de dados experimental com estrutura realista em R, partindo de parâmetros definidos com base na literatura agronômica.
+
+O pipeline completo é executado automaticamente a cada atualização do repositório via **GitHub Actions** e publicado no **GitHub Pages**.
+:::
+
+## Contexto
+
+A ferrugem asiática da soja (*Phakopsora pachyrhizi*) é uma das principais doenças da cultura no Brasil. Ensaios de eficácia avaliam o desempenho de fungicidas sob diferentes doses e condições ambientais.
+
+Simular dados com estrutura de ensaio real permite:
+
+- Validar pipelines de análise antes de receber dados reais
+- Ensinar delineamento experimental com exemplos reprodutíveis
+- Testar se os modelos estatísticos recuperam os parâmetros verdadeiros
+
+## Estrutura do experimento
+
+O ensaio segue um **delineamento em blocos casualizados completos (RCBD)** com medições repetidas no tempo.
+
+| Fator | Níveis |
+|---|---|
+| Tratamento | Controle, dose baixa, dose média, dose alta |
+| Bloco | 6 blocos |
+| Localidade | 3 localidades |
+| Tempo de avaliação | 30, 60 e 90 dias após aplicação |
+| Repetições | 3 por combinação |
+
+: Estrutura do delineamento experimental {.striped}
+
+O total de unidades experimentais é:
+
+```{r}
+#| label: total-ue
+
+n_tratamentos  <- 4
+n_blocos       <- 6
+n_localidades  <- 3
+n_tempos       <- 3
+n_repeticoes   <- 3
+
+total <- n_tratamentos * n_blocos * n_localidades * n_tempos * n_repeticoes
+cat("Total de unidades experimentais:", total, "\n")
+```
+
+## Parâmetros verdadeiros
+
+Os efeitos verdadeiros dos tratamentos foram definidos antes da simulação. Essa prática permite verificar, após o ajuste do modelo, se os valores estimados se aproximam dos valores reais, o que valida a especificação do modelo.
+
+### Efeito sobre a severidade
+
+Os efeitos estão na escala logit, que é a escala natural de modelos para dados proporcionais com distribuição beta.
+
+```{r}
+#| label: params-severidade
+
+efeito_tratamento <- c(
+  controle   =  0.00,
+  dose_baixa = -0.60,
+  dose_media = -1.20,
+  dose_alta  = -2.00
+)
+
+tibble(
+  tratamento          = names(efeito_tratamento),
+  efeito_logit        = efeito_tratamento,
+  proporcao_estimada  = round(plogis(0.80 + efeito_tratamento) * 100, 1)
+) |>
+  knitr::kable(
+    col.names = c("Tratamento", "Efeito (logit)", "Severidade estimada (%)"),
+    align     = "lrr"
+  )
+```
+
+### Efeito sobre a produtividade
+
+```{r}
+#| label: params-produtividade
+
+efeito_prod <- c(
+  controle   =    0,
+  dose_baixa =  150,
+  dose_media =  320,
+  dose_alta  =  450
+)
+
+tibble(
+  tratamento       = names(efeito_prod),
+  ganho_kgha       = efeito_prod,
+  prod_estimada    = 3200 + efeito_prod
+) |>
+  knitr::kable(
+    col.names = c("Tratamento", "Ganho (kg/ha)", "Produtividade estimada (kg/ha)"),
+    align     = "lrr"
+  )
+```
+
+## Função de simulação
+
+A função abaixo gera uma unidade experimental com base nos parâmetros definidos. Ela incorpora:
+
+- **Efeito aleatório de bloco:** variação entre blocos com desvio padrão de 0,20 (escala logit)
+- **Efeito aleatório de localidade:** variação entre localidades com desvio padrão de 0,35
+- **Efeito do tempo:** redução linear da severidade ao longo das avaliações
+- **Covariáveis ambientais:** umidade relativa e temperatura média geradas aleatoriamente
+- **Variabilidade residual:** ruído gaussiano com desvio padrão de 0,15
+
+```{r}
+#| label: funcao-simulacao
+
+simular_ue <- function(tratamento, bloco, local, tempo, rep) {
+
+  ef_bloco <- rnorm(1, mean = 0, sd = 0.20)
+  ef_local <- rnorm(1, mean = 0, sd = 0.35)
+  umidade  <- runif(1, min = 55, max = 90)
+  temp_med <- runif(1, min = 18, max = 32)
+  ef_tempo <- -0.015 * tempo
+
+  logit_sev <- 0.80 +
+    efeito_tratamento[tratamento] +
+    ef_bloco +
+    ef_local +
+    ef_tempo +
+    0.008 * (umidade - 70) +
+    rnorm(1, mean = 0, sd = 0.15)
+
+  prob_sev   <- plogis(logit_sev)
+  severidade <- rbeta(1,
+                      shape1 = prob_sev * 8,
+                      shape2 = (1 - prob_sev) * 8) * 100
+
+  produtividade <- 3200 +
+    efeito_prod[tratamento] +
+    ef_bloco * 80 +
+    ef_local * 120 +
+    0.5 * tempo +
+    rnorm(1, mean = 0, sd = 90)
+
+  tibble(
+    tratamento    = tratamento,
+    bloco         = bloco,
+    local         = local,
+    tempo_dias    = tempo,
+    repeticao     = rep,
+    umidade_rel   = round(umidade, 1),
+    temp_media    = round(temp_med, 1),
+    severidade    = round(pmax(0, pmin(100, severidade)), 2),
+    produtividade = round(pmax(1500, produtividade), 1)
+  )
+}
+```
+
+## Geração dos dados
+
+```{r}
+#| label: gerar-dados
+
+set.seed(2024)
+
+tratamentos <- c("controle", "dose_baixa", "dose_media", "dose_alta")
+blocos      <- paste0("bloco_", 1:6)
+localidades <- paste0("local_", 1:3)
+tempos      <- c(30, 60, 90)
+repeticoes  <- 1:3
+
+dados <- expand_grid(
+  tratamento = tratamentos,
+  bloco      = blocos,
+  local      = localidades,
+  tempo_dias = tempos,
+  repeticao  = repeticoes
+) |>
+  pmap_dfr(function(tratamento, bloco, local, tempo_dias, repeticao) {
+    simular_ue(tratamento, bloco, local, tempo_dias, repeticao)
+  }) |>
+  mutate(
+    tratamento = factor(tratamento,
+                        levels = c("controle", "dose_baixa", "dose_media", "dose_alta")),
+    bloco      = factor(bloco),
+    local      = factor(local),
+    tempo_dias = factor(tempo_dias, levels = c(30, 60, 90))
+  )
+
+glimpse(dados)
+```
+
+## Verificação dos dados simulados
+
+### Distribuição da severidade
+
+```{r}
+#| label: fig-severidade
+#| fig-cap: "Distribuição da severidade por tratamento. A redução progressiva confirma que os efeitos verdadeiros foram incorporados corretamente na simulação."
+
+ggplot(dados, aes(x = tratamento, y = severidade, fill = tratamento)) +
+  geom_boxplot(alpha = 0.85, outlier.size = 1.5) +
+  scale_fill_manual(values = unname(cores_cafe)) +
+  labs(
+    x       = "Tratamento",
+    y       = "Severidade (%)",
+    caption = "Jennifer Lopes"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    legend.position = "none",
+    axis.text.x     = element_text(angle = 20, hjust = 1)
+  )
+```
+
+### Evolução temporal
+
+```{r}
+#| label: fig-temporal
+#| fig-cap: "Evolução da severidade média por tratamento ao longo do tempo. Barras indicam erro padrão."
+
+dados |>
+  group_by(tratamento, tempo_dias) |>
+  summarise(
+    media   = mean(severidade),
+    ep      = sd(severidade) / sqrt(n()),
+    .groups = "drop"
+  ) |>
+  ggplot(aes(x = tempo_dias, y = media,
+             color = tratamento, group = tratamento)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = media - ep, ymax = media + ep),
+                width = 0.15, linewidth = 0.6) +
+  scale_color_manual(values = unname(cores_cafe)) +
+  labs(
+    x       = "Dias após aplicação",
+    y       = "Severidade média (%)",
+    color   = "Tratamento",
+    caption = "Jennifer Lopes"
+  ) +
+  theme_classic(base_size = 13)
+```
+
+### Produtividade
+
+```{r}
+#| label: fig-produtividade
+#| fig-cap: "Produtividade por tratamento. O gradiente crescente reflete os efeitos verdadeiros definidos na simulação."
+
+ggplot(dados, aes(x = tratamento, y = produtividade, fill = tratamento)) +
+  geom_violin(alpha = 0.7, trim = FALSE) +
+  geom_boxplot(width = 0.15, fill = "white", outlier.size = 1) +
+  scale_fill_manual(values = unname(cores_cafe)) +
+  labs(
+    x       = "Tratamento",
+    y       = "Produtividade (kg/ha)",
+    caption = "Jennifer Lopes"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    legend.position = "none",
+    axis.text.x     = element_text(angle = 20, hjust = 1)
+  )
+```
+
+### Resumo descritivo
+
+```{r}
+#| label: tbl-resumo
+
+dados |>
+  group_by(tratamento) |>
+  summarise(
+    n             = n(),
+    sev_media     = round(mean(severidade), 2),
+    sev_dp        = round(sd(severidade), 2),
+    prod_media    = round(mean(produtividade), 1),
+    prod_dp       = round(sd(produtividade), 1),
+    .groups       = "drop"
+  ) |>
+  knitr::kable(
+    col.names = c("Tratamento", "n", "Severidade média (%)",
+                  "DP severidade", "Produtividade média (kg/ha)", "DP produtividade"),
+    align     = "lrrrrr"
+  )
+```
+
+## Reprodutibilidade
+
+Este relatório é gerado automaticamente pelo GitHub Actions a cada push no repositório. O pipeline completo, da simulação ao relatório, roda em ambiente Ubuntu com R e pacotes instalados via Posit Package Manager.
+
+Para reproduzir localmente:
+
+```r
+source("R/01_simular_dados.R")
+quarto::quarto_render("report/relatorio_simulacao.qmd")
+```
+
+## Informações da sessão
+
+```{r}
+#| label: session-info
+
+sessionInfo()
+```
