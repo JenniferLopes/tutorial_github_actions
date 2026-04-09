@@ -47,6 +47,9 @@ jobs:
             --output-dir ../docs \
             --execute-dir .
 
+      - name: Copiar index.html para docs
+        run: cp report/index.html docs/index.html
+
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v5
 
